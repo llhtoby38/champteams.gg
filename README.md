@@ -6,22 +6,27 @@
 
 ChampTeams is a competitive team-builder for the Pokemon Champions community — Pokemon roster, damage math, type coverage, and speed tiers all in one place. Built as a side project and grown organically through the Pokemon Champions Reddit community.
 
-![Team builder overview](public/screenshots/builder-overview.png)
+![Damage calcs against meta threats](public/screenshots/landing/s1-offensive-calcs.png)
 
 ## Features
 
 - **Team builder** — full Champions roster with EV/IV/nature/move/item editing
-- **Damage calculator** — Smogon-grade math via `@smogon/calc`, side-by-side offensive and defensive calcs
-- **Speed tier analysis** — see at a glance who outspeeds whom with current EV spreads
-- **Type coverage matrix** — find offensive holes and defensive weaknesses across the team
-- **Browse teams** — share builds, discover popular cores from the community
-- **Mega and item-aware stats** — preview transformations and Choice/Life Orb effects in calcs
+- **Damage calculator** — Smogon-grade math via `@smogon/calc`, side-by-side offensive and defensive calcs against the meta
+- **Speed tier analysis** — see who you outspeed with current EV spreads, plus mega-aware stats
+- **Type coverage matrix** — full 18-type defense + STAB coverage at a glance
+- **Mobile-first selectors** — Pokemon, items, moves and coverage all designed for one-hand use
+- **Showdown import / export** — paste your existing teams in or share builds with one click
+- **Browse community teams** — discover top cores, creator teams, and community submissions
 
 ## Screenshots
 
-| Browse teams | Speed tiers | Type coverage |
+| Defensive calcs | Speed tiers | Mega stats |
 |---|---|---|
-| ![](public/screenshots/browse-teams.png) | ![](public/screenshots/speed-tiers.png) | ![](public/screenshots/type-coverage.png) |
+| ![Defensive damage calcs](public/screenshots/landing/s1-defensive-calcs.png) | ![Speed tier comparison](public/screenshots/landing/s1-speed-tiers.png) | ![Mega evolution stats](public/screenshots/landing/s1-mega-stats.png) |
+
+| Saved teams | Creator teams | Top cores |
+|---|---|---|
+| ![My teams page](public/screenshots/landing/s3-my-teams.png) | ![Creator teams browser](public/screenshots/landing/s4-creator-teams.png) | ![Top cores from community](public/screenshots/landing/s4-top-cores.png) |
 
 ## Tech stack
 
