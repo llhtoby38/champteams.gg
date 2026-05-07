@@ -1,0 +1,1 @@
+CREATE INDEX "teams_user_updated_idx" ON "teams" USING btree ("user_id","updated_at" DESC);
