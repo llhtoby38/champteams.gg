@@ -64,6 +64,30 @@ interface PokemonSelectorProps {
    * the pokemon editor exposes a form toggle.
    */
   showBattleForms?: boolean;
+  /**
+   * Current team members. When provided, the selector enables team-roster mode:
+   *  - already-rostered Pokemon (and any sibling Mega forms of the same base)
+   *    are hidden — species clause means you can't run two Charizards regardless
+   *    of mega state.
+   *  - results are sorted with /api/partners suggestions pinned to the top,
+   *    then by tournament meta score so the strongest picks surface first.
+   *  - matching partner cards get a small badge.
+   * When undefined (e.g. the meta-threat editor's selector), behavior is
+   * unchanged.
+   */
+  teamSpecies?: PokemonSpecies[];
+}
+
+/**
+ * Family key used to enforce species clause across base + mega forms.
+ * Mega forms collapse to their base species name so a Charizard on the team
+ * hides Charizard-Mega-X and Charizard-Mega-Y. Regional forms (Tauros-Paldea-*)
+ * are distinct species under the clause, so they keep their own keys.
+ */
+function speciesFamilyKey(p: { name: string; baseSpecies?: string | null; tags?: string[] | null }): string {
+  const isMega = !!p.tags?.includes('Mega Evolution') || /-Mega(-[XYZ])?$/.test(p.name);
+  if (isMega && p.baseSpecies) return p.baseSpecies;
+  return p.name;
 }
 
 const VGC_POPULAR_MOVES = [
@@ -497,7 +521,7 @@ function PlaystyleFilterDialog({ open, onClose, selectedTags, onToggleTag }: {
   );
 }
 
-export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'season-m1', showBattleForms = false }: PokemonSelectorProps) {
+export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'season-m1', showBattleForms = false, teamSpecies }: PokemonSelectorProps) {
   const [search, setSearch] = useState('');
   const [allPokemon, setAllPokemon] = useState<PokemonWithFormat[]>([]);
   const [loading, setLoading] = useState(false);
@@ -505,6 +529,11 @@ export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'seas
   const [selectedGen, setSelectedGen] = useState<number[] | null>(null);
   const [showMegasOnly, setShowMegasOnly] = useState(false);
   const [derivedTags, setDerivedTags] = useState<Record<string, string[]>>({});
+  // Team-roster mode: partner scores indexed by canonical pokemon id (e.g.
+  // "garchomp"). Tier data per id powers the secondary sort + on-card stats.
+  const [partnerScoreById, setPartnerScoreById] = useState<Record<string, number>>({});
+  const [tierDataById, setTierDataById] = useState<Record<string, { metaScore: number; usage: number | null; winRate: number | null }>>({});
+  const rosterMode = !!teamSpecies && teamSpecies.length > 0;
 
   // Move filter state
   const [moveFilterMoves, setMoveFilterMoves] = useState<Set<string>>(new Set());
@@ -576,6 +605,50 @@ export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'seas
       .catch(() => {});
   }, [open, formatId]);
 
+  // Team-roster mode: fetch partner suggestions for the current team.
+  // We pass the full team as both `species` (anchors) and `exclude` so the API
+  // never includes a Pokemon already on the team in its returned partner list.
+  // We don't pass partners through to the actual exclusion filter here — that's
+  // done client-side via speciesFamilyKey so megas get filtered too.
+  const teamNamesKey = (teamSpecies ?? []).map(s => s.name).sort().join('|');
+  useEffect(() => {
+    if (!open || !rosterMode) { setPartnerScoreById({}); return; }
+    const ctl = new AbortController();
+    const params = new URLSearchParams();
+    for (const s of teamSpecies!) params.append('species', s.name);
+    for (const s of teamSpecies!) params.append('exclude', s.name);
+    params.set('limit', '20');
+    fetch(`/api/partners?${params}`, { signal: ctl.signal })
+      .then(r => r.ok ? r.json() : { partners: [] })
+      .then((data: { partners?: { pokemonId: string; score: number }[] }) => {
+        const map: Record<string, number> = {};
+        for (const p of data.partners ?? []) map[p.pokemonId] = p.score;
+        setPartnerScoreById(map);
+      })
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [open, rosterMode, teamNamesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Team-roster mode: fetch tier-list data — meta score for ordering and
+  // usage% + WR for the on-card stats badge.
+  useEffect(() => {
+    if (!open || !rosterMode) { setTierDataById({}); return; }
+    const ctl = new AbortController();
+    fetch(`/api/tier-list?format=${formatId}`, { signal: ctl.signal })
+      .then(r => r.ok ? r.json() : { tiers: [] })
+      .then((data: { tiers?: { pokemon?: { id: string; metaScore: number; tournamentUsage: number | null; winRate: number | null }[] }[] }) => {
+        const map: Record<string, { metaScore: number; usage: number | null; winRate: number | null }> = {};
+        for (const t of data.tiers ?? []) {
+          for (const p of t.pokemon ?? []) {
+            map[p.id] = { metaScore: p.metaScore, usage: p.tournamentUsage, winRate: p.winRate };
+          }
+        }
+        setTierDataById(map);
+      })
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [open, rosterMode, formatId]);
+
   // Client-side filtering (search, type, gen, mega, playstyle)
   const filtered = useMemo(() => {
     let result = allPokemon;
@@ -633,8 +706,39 @@ export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'seas
       );
     }
 
+    // Team-roster mode: hide Pokemon whose family is already on the team.
+    // A Pokemon's family includes both its base form and all megas of that
+    // base, so adding "Charizard" hides Charizard-Mega-X / Charizard-Mega-Y.
+    // Regional forms (Tauros-Paldea-Aqua etc.) get their own family keys, so
+    // they remain selectable alongside the original.
+    if (rosterMode) {
+      const teamFamilyKeys = new Set((teamSpecies ?? []).map(s => speciesFamilyKey(s)));
+      result = result.filter(p => !teamFamilyKeys.has(speciesFamilyKey(p)));
+    }
+
+    // Team-roster ordering: partners first (descending partner score), then
+    // remaining Pokemon by tournament meta score, with no-data Pokemon falling
+    // back to whatever upstream order they came in. We only override the
+    // default order when in roster mode — the meta-threat editor's selector
+    // keeps its dex-based listing.
+    if (rosterMode) {
+      // Stable sort: copy index so ties resolve to original order (which is
+      // already base-form-first by dex from the API).
+      const indexed = result.map((p, i) => ({ p, i }));
+      indexed.sort((a, b) => {
+        const aP = partnerScoreById[a.p.id] ?? -1;
+        const bP = partnerScoreById[b.p.id] ?? -1;
+        if (aP !== bP) return bP - aP; // partner score desc
+        const aM = tierDataById[a.p.id]?.metaScore ?? -1;
+        const bM = tierDataById[b.p.id]?.metaScore ?? -1;
+        if (aM !== bM) return bM - aM; // meta score desc
+        return a.i - b.i; // stable fallback
+      });
+      result = indexed.map(x => x.p);
+    }
+
     return result;
-  }, [allPokemon, search, selectedTypes, selectedGen, showMegasOnly, abilityFilter, playstyleTags, derivedTags, showBattleForms]);
+  }, [allPokemon, search, selectedTypes, selectedGen, showMegasOnly, abilityFilter, playstyleTags, derivedTags, showBattleForms, rosterMode, teamSpecies, partnerScoreById, tierDataById]);
 
   const toggleType = (type: string) => {
     setSelectedTypes((prev) => {
@@ -838,23 +942,40 @@ export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'seas
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-11 2xl:grid-cols-13 gap-2 pt-1">
-              {filtered.map((p) => (
+              {filtered.map((p) => {
+                const isPartner = rosterMode && partnerScoreById[p.id] != null;
+                const tier = rosterMode ? tierDataById[p.id] : undefined;
+                return (
                 <button
                   key={p.id}
                   onClick={() => {
                     onSelect(p);
                     onOpenChange(false);
                   }}
-                  className="flex flex-col items-center p-2 rounded-lg border border-transparent hover:border-primary/40 hover:bg-accent transition-all group relative"
+                  className={`flex flex-col items-center p-2 rounded-lg border transition-all group relative ${
+                    isPartner
+                      ? 'border-[#d4a017]/50 bg-[#d4a017]/5 hover:border-[#d4a017] hover:bg-[#d4a017]/10'
+                      : 'border-transparent hover:border-primary/40 hover:bg-accent'
+                  }`}
                   title={(() => {
                     const allTags = Array.from(new Set([
                       ...(POKEMON_ROLE_TAGS[p.name] || []),
                       ...(derivedTags[p.name] || []),
                     ]));
                     const tagLabels = allTags.map(r => PLAYSTYLE_TAGS.find(t => t.id === r)?.label || r).join(', ');
-                    return `${p.name} — ${p.types.join('/')}${tagLabels ? '\n' + tagLabels : ''}`;
+                    const partnerNote = isPartner ? '\nSuggested partner for your team' : '';
+                    return `${p.name} — ${p.types.join('/')}${tagLabels ? '\n' + tagLabels : ''}${partnerNote}`;
                   })()}
                 >
+                  {/* Suggested-partner badge (team-roster mode only) */}
+                  {isPartner && (
+                    <div
+                      className="absolute top-1 left-1 flex items-center justify-center bg-[#d4a017] text-white rounded-full h-4 w-4 shadow-sm"
+                      title="Suggested partner for your team"
+                    >
+                      <Sparkles className="h-2.5 w-2.5" />
+                    </div>
+                  )}
                   {/* Restricted badge */}
                   {p.isRestricted && (
                     <div className="absolute top-1 right-1" title="Restricted">
@@ -881,8 +1002,26 @@ export function PokemonSelector({ open, onOpenChange, onSelect, formatId = 'seas
                       />
                     ))}
                   </div>
+                  {/* Tournament usage + WR — only rendered in roster mode, and
+                      only when the Pokemon has actually placed in tournaments
+                      (otherwise the row would just be a long line of dashes). */}
+                  {tier && (tier.usage != null || tier.winRate != null) && (
+                    <div className="mt-1 flex items-center gap-1 text-[9px] tabular-nums leading-none">
+                      {tier.usage != null && (
+                        <span className="text-blue-500 font-semibold" title="Tournament usage">
+                          {tier.usage.toFixed(1)}%
+                        </span>
+                      )}
+                      {tier.winRate != null && (
+                        <span className={tier.winRate >= 50 ? 'text-green-600' : 'text-muted-foreground'} title="Win rate">
+                          {tier.winRate.toFixed(0)}WR
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

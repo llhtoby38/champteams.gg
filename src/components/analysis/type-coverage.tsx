@@ -48,7 +48,25 @@ function getOffensiveMultiplier(moveType: string, defenderType: string): number 
   return OFFENSE_CHART[moveType]?.[defenderType] ?? 1;
 }
 
-function getDefensiveMultiplier(pokemonTypes: string[], attackingType: string): number {
+// Abilities that grant a complete immunity to a single attacking type.
+// Coverage view ignores conditional ability interactions (Iron Ball, Gravity, etc.).
+const ABILITY_IMMUNITY: Record<string, string> = {
+  Levitate: 'Ground',
+  'Earth Eater': 'Ground',
+  'Flash Fire': 'Fire',
+  'Well-Baked Body': 'Fire',
+  'Volt Absorb': 'Electric',
+  'Lightning Rod': 'Electric',
+  'Motor Drive': 'Electric',
+  'Water Absorb': 'Water',
+  'Storm Drain': 'Water',
+  'Dry Skin': 'Water',
+  'Sap Sipper': 'Grass',
+  'Purifying Salt': 'Ghost',
+};
+
+function getDefensiveMultiplier(pokemonTypes: string[], attackingType: string, ability?: string): number {
+  if (ability && ABILITY_IMMUNITY[ability] === attackingType) return 0;
   let multiplier = 1;
   for (const defType of pokemonTypes) {
     const chart = TYPE_CHART[defType];
@@ -104,14 +122,14 @@ function SpriteCell({ species, ringColor, dim = false, label }: { species: Pokem
 }
 
 interface TypeCoverageProps {
-  team: { species: PokemonSpecies; moves: string[] }[];
+  team: { species: PokemonSpecies; moves: string[]; ability?: string }[];
 }
 
 export function TypeCoverage({ team }: TypeCoverageProps) {
   const { defenseRows, offenseRows, problems } = useMemo(() => {
     const defenseRows = ALL_TYPES.map((atkType) => {
-      const cells: DefenseCell[] = team.map(({ species }) => {
-        const mult = getDefensiveMultiplier(species.types, atkType);
+      const cells: DefenseCell[] = team.map(({ species, ability }) => {
+        const mult = getDefensiveMultiplier(species.types, atkType, ability);
         const status: DefenseStatus =
           mult === 0 ? 'immune' : mult > 1 ? 'weak' : mult < 1 ? 'resist' : 'neutral';
         return { species, status, mult };
@@ -198,6 +216,12 @@ export function TypeCoverage({ team }: TypeCoverageProps) {
         </div>
       )}
 
+      {/* Defense + Offense grids — single column on small screens, side-by-side on lg+.
+          @container makes this responsive to the Dialog width rather than the viewport,
+          so it adapts cleanly to the wider modal. */}
+      <div className="@container">
+      <div className="grid grid-cols-1 @[820px]:grid-cols-2 gap-4">
+
       {/* Defense grid */}
       <div className="rounded-xl border bg-card p-3">
         <div className="flex items-center justify-between mb-2">
@@ -260,6 +284,9 @@ export function TypeCoverage({ team }: TypeCoverageProps) {
           ))}
         </div>
       </div>
+
+      </div>{/* close grid */}
+      </div>{/* close @container */}
 
       <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
         <span className="text-red-400">Red ring</span> = weak ·

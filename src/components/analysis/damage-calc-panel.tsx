@@ -772,27 +772,30 @@ function DamageView({ mode, results, loading, metaThreats, activeMoves, onUpdate
       {loading && results.length > 0 && (
         <div className="absolute top-1 right-1 text-[10px] text-muted-foreground bg-background/80 px-1.5 py-0.5 rounded pointer-events-none">Recalculating…</div>
       )}
-      {results.map(({ threat, results: moveResults }) => {
-        const valid = moveResults.filter(r => r.maxPercent > 0);
-        if (valid.length === 0) return null;
-        const threatData = metaThreats.find(t => t.species === threat);
+      {/*
+        Iterate over metaThreats (stable identity) rather than results so the
+        threat cards — and the hover popup mounted inside ThreatSpriteWithPopup —
+        stay mounted across recalc cycles. Editing a threat's stats invalidates
+        the calc key, which used to wipe results to [] and unmount the popup
+        mid-keystroke. Now the card persists; only its bars swap.
+      */}
+      {metaThreats.map(threat => {
+        const result = results.find(r => r.threat === threat.species);
+        const valid = result?.results.filter(r => r.maxPercent > 0) ?? [];
+        if (result && valid.length === 0) return null;
         return (
-          <div key={threatData?.id ?? threat} className="border rounded-lg p-2 text-xs">
+          <div key={threat.id} className="border rounded-lg p-2 text-xs">
             <div className="flex items-center gap-1.5 mb-1.5">
-              {threatData ? (
-                <ThreatSpriteWithPopup threat={threatData} size={24} onUpdate={onUpdateThreat} onOpenInEditor={onOpenThreatInEditor} />
-              ) : (
-                <PokemonMiniSprite spriteId={threat.toLowerCase().replace(/[^a-z0-9-]/g, '')} name={threat} size={24} />
-              )}
-              <span className="font-medium text-[11px]">{threat}</span>
-              {threatData?.role && (
+              <ThreatSpriteWithPopup threat={threat} size={24} onUpdate={onUpdateThreat} onOpenInEditor={onOpenThreatInEditor} />
+              <span className="font-medium text-[11px]">{threat.species}</span>
+              {threat.role && (
                 <span className="text-[9px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                  {threatData.role}
+                  {threat.role}
                 </span>
               )}
             </div>
             <div className="space-y-1">
-              {valid.map((r, i) => {
+              {valid.length > 0 ? valid.map((r, i) => {
                 const barColor = mode === 'defensive'
                   ? (r.maxPercent >= 100 ? '#ef4444' : r.maxPercent >= 50 ? '#f59e0b' : '#d1d5db')
                   : (r.maxPercent >= 100 ? '#22c55e' : r.maxPercent >= 50 ? '#f59e0b' : '#d1d5db');
@@ -810,7 +813,9 @@ function DamageView({ mode, results, loading, metaThreats, activeMoves, onUpdate
                     </span>
                   </div>
                 );
-              })}
+              }) : (
+                <div className="text-[10px] text-muted-foreground italic">Calculating…</div>
+              )}
             </div>
           </div>
         );

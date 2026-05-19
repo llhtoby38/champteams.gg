@@ -313,6 +313,34 @@ export const tournamentEntries = pgTable(
   (table) => [unique().on(table.tournamentId, table.playerName)],
 );
 
+// ─── Pokemon Pair Stats (Suggested Partners) ────────────────────────────────
+//
+// Co-occurrence + win-rate stats per (primary, partner) pair. Pre-computed
+// from tournament_entries because querying on demand would force a self-join
+// on a 4k+ row table on every builder page load. Two rows per pair (A→B and
+// B→A) so the "% of A teams with B" metric is direct without a swap.
+
+export const pokemonPairStats = pgTable(
+  'pokemon_pair_stats',
+  {
+    formatId: text('format_id').notNull(),
+    primaryId: text('primary_id').notNull(),
+    partnerId: text('partner_id').notNull(),
+    primaryName: text('primary_name').notNull(),
+    partnerName: text('partner_name').notNull(),
+    coCount: integer('co_count').notNull(),
+    primaryCount: integer('primary_count').notNull(),
+    coOccurrencePct: real('co_occurrence_pct').notNull(),
+    winRateTogether: real('win_rate_together'),
+    smogonTeammatePct: real('smogon_teammate_pct'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.formatId, table.primaryId, table.partnerId] }),
+    index('idx_pps_primary').on(table.formatId, table.primaryId),
+  ],
+);
+
 // ─── Pipeline Metadata ──────────────────────────────────────────────────────
 
 export const pipelineMetadata = pgTable('pipeline_metadata', {

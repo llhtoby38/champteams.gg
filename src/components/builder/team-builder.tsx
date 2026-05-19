@@ -485,7 +485,11 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
     setSelectorOpen(true);
   };
 
-  const handleSelectPokemon = async (species: PokemonSpecies) => {
+  const handleSelectPokemon = async (species: PokemonSpecies, targetSlot?: number) => {
+    // Caller-supplied slot wins (Suggested Partners passes the first empty slot
+    // directly). Falls back to selectorSlot for the PokemonSelector path.
+    const slot = targetSlot ?? selectorSlot;
+
     // If the user picked a Mega form directly, convert to base form + auto-equip mega stone
     const megaMatch = species.name.match(/^(.+?)-Mega(?:-([XYZ]))?$/);
     if (megaMatch) {
@@ -507,8 +511,8 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
         const data: PokemonSpecies[] = await res.json();
         const baseSpecies = data.find(p => p.name === fetchBase) || data.find(p => p.name === baseName) || data[0];
         if (baseSpecies) {
-          team.addPokemon(selectorSlot, baseSpecies);
-          if (stoneEntry) team.updateSet(selectorSlot, { item: stoneEntry.stone });
+          team.addPokemon(slot, baseSpecies);
+          if (stoneEntry) team.updateSet(slot, { item: stoneEntry.stone });
           // Auto-fill from default set (but keep mega stone if already assigned)
           const megaId = species.id.replace(/-/g, '').toLowerCase();
           const ds = defaultSetsMap[megaId] || defaultSetsMap[baseSpecies.id];
@@ -520,16 +524,16 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
             if (ds.evs) updates.evs = ds.evs;
             // Don't override item if mega stone was set
             if (!stoneEntry && ds.item) updates.item = ds.item;
-            team.updateSet(selectorSlot, updates);
+            team.updateSet(slot, updates);
           }
-          team.setSelectedSlot(selectorSlot);
+          team.setSelectedSlot(slot);
           setTeamGridCollapsed(true);
           return;
         }
       } catch { /* fall through to normal add */ }
     }
 
-    team.addPokemon(selectorSlot, species);
+    team.addPokemon(slot, species);
     // Auto-fill from default set for non-mega Pokemon
     const ds = defaultSetsMap[species.id];
     if (ds) {
@@ -539,11 +543,12 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
       if (ds.nature) updates.nature = ds.nature;
       if (ds.moves && ds.moves.length > 0) updates.moves = [...ds.moves.slice(0, 4), ...Array(4 - Math.min(4, ds.moves.length)).fill('')].slice(0, 4);
       if (ds.evs) updates.evs = ds.evs;
-      team.updateSet(selectorSlot, updates);
+      team.updateSet(slot, updates);
     }
-    team.setSelectedSlot(selectorSlot);
+    team.setSelectedSlot(slot);
     setTeamGridCollapsed(true);
   };
+
 
   const handleSave = async () => {
     // Always cache to localStorage first
@@ -1085,9 +1090,9 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
           !fixed !top-14 !bottom-0 !left-0 !right-0
           !translate-x-0 !translate-y-0
           !max-w-none !rounded-none !rounded-t-xl
-          sm:!top-1/2 sm:!bottom-auto sm:!left-1/2 sm:!right-auto
-          sm:!-translate-x-1/2 sm:!-translate-y-1/2
-          sm:!max-w-3xl sm:!max-h-[80vh] sm:!rounded-xl
+          sm:!top-[5vh] sm:!bottom-auto sm:!left-1/2 sm:!right-auto
+          sm:!-translate-x-1/2 sm:!translate-y-0
+          sm:!w-[92vw] sm:!max-w-[1400px] sm:!max-h-[90vh] sm:!rounded-2xl
           flex flex-col gap-0 !p-0 overflow-y-auto
         ">
           <DialogHeader className="px-4 pt-4 pb-2 shrink-0"><DialogTitle>Type Analysis</DialogTitle></DialogHeader>
@@ -1108,7 +1113,7 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
           </div>
           <div className="flex-1 overflow-y-auto px-4 pb-4">
             {coverageTab === 'team' ? (
-              <TypeCoverage team={activeTeamMembers.map((s) => ({ species: s.species, moves: s.set.moves.filter(Boolean) }))} />
+              <TypeCoverage team={activeTeamMembers.map((s) => ({ species: s.species, moves: s.set.moves.filter(Boolean), ability: s.set.ability }))} />
             ) : (
               <TypeMatchupChart />
             )}
@@ -1145,7 +1150,13 @@ export function TeamBuilder({ initialTeamId, initialTeamData }: TeamBuilderProps
       />
 
       {/* Dialogs */}
-      <PokemonSelector open={selectorOpen} onOpenChange={setSelectorOpen} onSelect={handleSelectPokemon} formatId={formatId} />
+      <PokemonSelector
+        open={selectorOpen}
+        onOpenChange={setSelectorOpen}
+        onSelect={handleSelectPokemon}
+        formatId={formatId}
+        teamSpecies={activeTeamMembers.map(m => m.species)}
+      />
       <ShowdownExport open={showdownOpen} onOpenChange={setShowdownOpen} pokemon={team.toExportArray()} teamName={team.teamName} initialTab={showdownTab} onImport={handleImport} />
 
       {/* Share dialog */}
